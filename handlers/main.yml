@@ -1,0 +1,10 @@
+---
+- name: "samba_restart"
+  service:
+    name: smbd
+    state: restarted
+
+- name: "winbind_restart"
+  service:
+    name: winbind
+    state: restarted

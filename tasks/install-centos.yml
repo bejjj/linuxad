@@ -1,0 +1,13 @@
+---
+- name: Install AD client packages (CentOS)
+  yum:
+    name: ['samba', 'samba-winbind', 'samba-winbind-clients', 'krb5-workstation', 'pam_krb5']
+    state: present
+
+- name: Enable services (CentOS)
+  service:
+    name: samba
+    enabled: yes
+  service:
+    name: winbind
+    enabled: yes

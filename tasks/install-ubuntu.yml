@@ -1,0 +1,5 @@
+---
+- name: Install AD client packages (Ubuntu)
+  apt:
+    name: ['samba', 'winbind', 'libpam-winbind', 'libnss-winbind', 'krb5-config', 'krb5-user']
+    state: present

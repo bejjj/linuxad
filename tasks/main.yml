@@ -1,0 +1,128 @@
+---
+- include: install-ubuntu.yml
+  when: ansible_distribution == 'Ubuntu'
+
+- include: install-centos.yml
+  when: ansible_distribution == 'CentOS'
+
+- name: "Update Kerberos configuration"
+  template:
+    src: "krb5.conf.j2"
+    dest: "/etc/krb5.conf"
+
+- name: "Update Samba configuration"
+  ini_file:
+    path: "/etc/samba/smb.conf"
+    section: "global"
+    option:  "{{ item.option  }}"
+    value:   "{{ item.value   }}"
+  with_items: "{{ winbind_samba_conf }}"
+  notify:
+    - "samba_restart"
+    - "winbind_restart"
+
+- name: "Remove Samba Printers"
+  ini_file:
+    path: "/etc/samba/smb.conf"
+    section: "{{ item }}"
+    state: "absent"
+  with_items:
+    - "printers"
+    - "print$"
+  notify: "samba_restart"
+
+- name: "Create local admins group"
+  group:
+    name: localadmins
+    state: present
+
+- name: "Update sudoers file"
+  lineinfile:
+    dest: /etc/sudoers
+    state: present
+    regexp: '^%localadmins'
+    firstmatch: yes
+    insertafter: '^%admin'
+    line: '%localadmins ALL=(ALL) ALL'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: "Update nsswitch.conf"
+  lineinfile:
+    regexp: "{{ item.regexp }}"
+    line:   "{{ item.line   }}"
+    dest: "/etc/nsswitch.conf"
+  with_items:
+    - { regexp: '^passwd:', line: 'passwd:		compat winbind' }
+    - { regexp: '^group:' , line: 'group:		compat winbind' }
+    - { regexp: '^shadow:', line: 'shadow:		compat winbind' }
+  notify: "samba_restart"
+
+- name: "Configure PAM authentication (Ubuntu)"
+  when: ansible_distribution == 'Ubuntu'
+  template:
+    src: "common-auth.j2"
+    dest: "/etc/pam.d/common-auth"
+  notify: "samba_restart"
+
+- name: "Configure PAM password authentication (CentOS)"
+  when: ansible_distribution == 'CentOS'
+  template:
+    src: "password-auth.j2"
+    dest: "/etc/pam.d/password-auth"
+    force: yes
+  notify: "samba_restart"
+
+- name: "Configure PAM system authentication (CentOS)"
+  when: ansible_distribution == 'CentOS'
+  template:
+    src: "system-auth.j2"
+    dest: "/etc/pam.d/system-auth"
+    force: yes
+  notify: "samba_restart"
+
+- name: "Configure PAM winbind (CentOS)"
+  when: ansible_distribution == 'CentOS'
+  template:
+    src: "pam_winbind.conf.j2"
+    dest: "/etc/security/pam_winbind.conf"
+    force: yes
+  notify: "samba_restart"
+
+- name: "Configure home directory creation"
+  when: ansible_distribution == 'Ubuntu'
+  lineinfile:
+    dest: "/etc/pam.d/common-session"
+    regexp: "pam_mkhomedir"
+    line: "session optional        pam_mkhomedir.so skel=/etc/skel/ umask=0022"
+  notify: "samba_restart"
+
+- name: "Check domain status"
+  command: "wbinfo --own-domain"
+  register: "domain"
+
+- name: "Join domain"
+  command: "net join -U {{ ad_domain_join.user }}%{{ ad_domain_join.password }}"
+  no_log: true
+  when: domain.stdout != winbind_workgroup
+
+- name: "Group mapping (Ubuntu)"
+  when: ansible_distribution == 'Ubuntu'
+  include_tasks: "groups.yml"
+  vars:
+    groupmap: "{{ item }}"
+  with_items: "{{ winbind_groupmap_admins | union(winbind_groupmap_users)}}"
+
+- name: "Group mapping (CentOS)"
+  when: ansible_distribution == 'CentOS'
+  include_tasks: "groups.yml"
+  vars:
+    groupmap: "{{ item }}"
+  with_items: "{{ winbind_groupmap_admins_centos | union(winbind_groupmap_users_centos)}}"
+
+- name: "Host-specific group mappings"
+  when: host_ad_groupmaps is defined
+  include_tasks: "groups.yml"
+  vars:
+    groupmap: "{{ item }}"
+  with_items: "{{ host_ad_groupmaps }}"
+
